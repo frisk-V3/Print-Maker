@@ -1,40 +1,42 @@
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import Response
-from pydantic import BaseModel
-from .pdf_engine import generate_pdf_from_html
-from jinja2 import Environment, FileSystemLoader
 import os
+import sys
+from fastapi import FastAPI, Response
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from jinja2 import Environment, FileSystemLoader
+
+# --- 重要：EXE化した時のパス問題を解決する魔法のコード ---
+def get_base_path():
+    if hasattr(sys, '_MEIPASS'):
+        return sys._MEIPASS
+    return os.path.dirname(os.path.abspath(__file__))
+
+base_path = get_base_path()
+
+# 相対インポート(from .generator)を「絶対インポート」に変える
+import generator  # 同じフォルダにある場合はこれだけでOK
 
 app = FastAPI()
 
-# データの型定義（TypeScript側と合わせる）
-class PrintData(BaseModel):
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+class PrintRequest(BaseModel):
     title: str
     content: str
     author: str
+    date: str
 
-# Jinja2の設定（HTMLテンプレートを読み込む）
-env = Environment(loader=FileSystemLoader("backend/templates"))
+# テンプレートのパスもEXE用に修正
+template_env = Environment(loader=FileSystemLoader(os.path.join(base_path, "templates")))
 
-@app.post("/generate-pdf")
-async def generate_print(data: PrintData):
-    try:
-        # 1. テンプレートにデータを流し込む
-        template = env.get_template("print_layout.html")
-        html_content = template.render(
-            title=data.title,
-            content=data.content,
-            author=data.author
-        )
-
-        # 2. PlaywrightでPDFに変換
-        pdf_bytes = await generate_pdf_from_html(html_content)
-
-        # 3. PDFとしてレスポンスを返す
-        return Response(
-            content=pdf_bytes,
-            media_type="application/pdf",
-            headers={"Content-Disposition": "attachment; filename=print.pdf"}
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+@app.post("/api/generate")
+async def generate(data: PrintRequest):
+    template = template_env.get_template("base.html")
+    html = template.render(data.model_dump())
+    pdf_bytes = await generator.export_pdf(html) # ここで呼び出す
+    return Response(content=pdf_bytes, media_type="application/pdf")
