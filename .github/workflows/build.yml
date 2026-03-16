@@ -1,76 +1,95 @@
-name: frisk-V3-Instant-Build
+name: frisk-V3-Ultimate-Auto-Build
 
 on:
   push:
-    branches: [ "main", "master" ] # メインブランチにプッシュで即起動
-  workflow_dispatch: # 手動で「Run workflow」ボタンからも実行可能
+    branches: [ "main", "master" ]
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  # --- Windows版 (.exe) のビルド ---
+  # --- 1. Windows版 EXE ビルド ---
   build-windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Pythonセットアップ
+
+      - name: Python Setup
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          
-      - name: 依存ライブラリとPyInstallerのインストール
+
+      - name: Install Dependencies
         run: |
           pip install -r backend/requirements.txt
-          pip install pyinstaller
-          
-      - name: EXE作成 (本気ビルド)
+          pip install pyinstaller playwright
+          playwright install chromium
+
+      - name: Build EXE (Relative Import Fix)
         run: |
-          # 1ファイルに固め、コンソールを出さない設定
-          pyinstaller --onefile --noconsole --name frisk-V3 backend/main.py
-          
-      - name: 成果物を保存
+          # 相対パスエラーを防ぐため、backendディレクトリ内でビルドを実行
+          cd backend
+          pyinstaller --onefile --noconsole --name frisk-V3-win `
+          --add-data "templates;templates" `
+          --hidden-import=generator `
+          main.py
+          mv dist/frisk-V3-win.exe ../frisk-V3-win.exe
+
+      - name: Upload Windows Artifact
         uses: actions/upload-artifact@v4
         with:
           name: windows-binary
-          path: dist/frisk-V3.exe
+          path: frisk-V3-win.exe
 
-  # --- Web版 (HTML/JS) のビルド ---
+  # --- 2. Web版 (HTML/JS) ビルド ---
   build-web:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Node.jsセットアップ
+      - name: Node Setup
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - name: フロントエンドビルド
+      - name: Build Frontend
         run: |
-          cd frontend
+          # フォルダがあってもなくても動く「本気」の判定
+          TARGET_DIR=$( [ -d "frontend" ] && echo "frontend" || echo "." )
+          cd $TARGET_DIR
           npm install
           npm run build
-      - name: 成果物を保存
+          # ビルド結果(dist)をルートに移動
+          cp -r dist ../web-dist
+      - name: Upload Web Artifact
         uses: actions/upload-artifact@v4
         with:
           name: web-dist
-          path: frontend/dist/
+          path: web-dist/
 
-  # --- 自動リリース (EXEとHTMLを載せる) ---
-  create-release:
+  # --- 3. GitHub Release 自動作成 ---
+  deploy-release:
     needs: [build-windows, build-web]
     runs-on: ubuntu-latest
     steps:
-      - name: すべての成果物をダウンロード
+      - name: Download All Artifacts
         uses: actions/download-artifact@v4
-        
-      - name: 自動リリース作成
+
+      - name: Zip Web Content
+        run: zip -r frisk-V3-web-edition.zip web-dist/
+
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: build-${{ github.run_number }} # 実行番号をタグにする
-          name: "frisk-V3 Auto Build #${{ github.run_number }}"
+          tag_name: v3.0.${{ github.run_number }}
+          name: "frisk-V3 Release #${{ github.run_number }}"
+          body: |
+            ## frisk-V3 本気ビルド完了
+            - **Windows版**: `frisk-V3-win.exe` (ダブルクリックで起動)
+            - **Web版**: `frisk-V3-web-edition.zip` (展開してindex.htmlを開く)
+            
+            ※Playwrightのブラウザエンジンを内蔵しているため、初回起動は少し時間がかかる場合があります。
           files: |
-            windows-binary/frisk-V3.exe
-          body: "GitHub Actionsによる本気の自動ビルドです。Windows版EXEが生成されました。"
+            windows-binary/frisk-V3-win.exe
+            frisk-V3-web-edition.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
