@@ -1,71 +1,76 @@
-name: frisk-V3-Ultimate-Pipeline
+name: frisk-V3-Instant-Build
 
 on:
   push:
-    tags:
-      - 'v*' # v1.0.0 などのタグがついた時だけリリースを実行
+    branches: [ "main", "master" ] # メインブランチにプッシュで即起動
+  workflow_dispatch: # 手動で「Run workflow」ボタンからも実行可能
 
 permissions:
-  contents: write # リリース作成に必須
+  contents: write
 
 jobs:
-  # --- ジョブ1: フロントエンド(HTML版)のビルド ---
+  # --- Windows版 (.exe) のビルド ---
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Pythonセットアップ
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          
+      - name: 依存ライブラリとPyInstallerのインストール
+        run: |
+          pip install -r backend/requirements.txt
+          pip install pyinstaller
+          
+      - name: EXE作成 (本気ビルド)
+        run: |
+          # 1ファイルに固め、コンソールを出さない設定
+          pyinstaller --onefile --noconsole --name frisk-V3 backend/main.py
+          
+      - name: 成果物を保存
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-binary
+          path: dist/frisk-V3.exe
+
+  # --- Web版 (HTML/JS) のビルド ---
   build-web:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Setup Node
+      - name: Node.jsセットアップ
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - name: Build Web
+      - name: フロントエンドビルド
         run: |
           cd frontend
           npm install
           npm run build
-      - name: Upload Web Artifact
+      - name: 成果物を保存
         uses: actions/upload-artifact@v4
         with:
           name: web-dist
           path: frontend/dist/
 
-  # --- ジョブ2: Windows版(.exe)のビルド ---
-  build-windows:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - name: Install PyInstaller & Deps
-        run: |
-          pip install -r backend/requirements.txt
-          pip install pyinstaller
-      - name: Build EXE
-        run: |
-          # バックエンドとフロントエンドを固めて1つのexeにする本気設定
-          pyinstaller --onefile --noconsole --name frisk-V3-win backend/main.py
-      - name: Upload EXE Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-exe
-          path: dist/frisk-V3-win.exe
-
-  # --- ジョブ3: リリースへの自動自動デプロイ ---
-  release:
-    needs: [build-web, build-windows]
+  # --- 自動リリース (EXEとHTMLを載せる) ---
+  create-release:
+    needs: [build-windows, build-web]
     runs-on: ubuntu-latest
     steps:
-      - name: Download All Artifacts
+      - name: すべての成果物をダウンロード
         uses: actions/download-artifact@v4
-      
-      - name: Create Release
+        
+      - name: 自動リリース作成
         uses: softprops/action-gh-release@v1
         with:
+          tag_name: build-${{ github.run_number }} # 実行番号をタグにする
+          name: "frisk-V3 Auto Build #${{ github.run_number }}"
           files: |
-            windows-exe/frisk-V3-win.exe
-            web-dist/*
-          body: "frisk-V3 自動ビルド版です。Windows用EXEとWeb版HTMLが含まれています。"
+            windows-binary/frisk-V3.exe
+          body: "GitHub Actionsによる本気の自動ビルドです。Windows版EXEが生成されました。"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
