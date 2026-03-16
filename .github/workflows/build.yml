@@ -1,0 +1,71 @@
+name: frisk-V3-Ultimate-Pipeline
+
+on:
+  push:
+    tags:
+      - 'v*' # v1.0.0 などのタグがついた時だけリリースを実行
+
+permissions:
+  contents: write # リリース作成に必須
+
+jobs:
+  # --- ジョブ1: フロントエンド(HTML版)のビルド ---
+  build-web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Build Web
+        run: |
+          cd frontend
+          npm install
+          npm run build
+      - name: Upload Web Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: frontend/dist/
+
+  # --- ジョブ2: Windows版(.exe)のビルド ---
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install PyInstaller & Deps
+        run: |
+          pip install -r backend/requirements.txt
+          pip install pyinstaller
+      - name: Build EXE
+        run: |
+          # バックエンドとフロントエンドを固めて1つのexeにする本気設定
+          pyinstaller --onefile --noconsole --name frisk-V3-win backend/main.py
+      - name: Upload EXE Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-exe
+          path: dist/frisk-V3-win.exe
+
+  # --- ジョブ3: リリースへの自動自動デプロイ ---
+  release:
+    needs: [build-web, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download All Artifacts
+        uses: actions/download-artifact@v4
+      
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            windows-exe/frisk-V3-win.exe
+            web-dist/*
+          body: "frisk-V3 自動ビルド版です。Windows用EXEとWeb版HTMLが含まれています。"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
