@@ -1,4 +1,4 @@
-name: frisk-V3-Ultimate-Auto-Build
+name: frisk-V3-Full-Automation
 
 on:
   push:
@@ -9,40 +9,32 @@ permissions:
   contents: write
 
 jobs:
-  # --- 1. Windows版 EXE ビルド ---
+  # --- Windows EXE ビルド ---
   build-windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Python Setup
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
-      - name: Install Dependencies
+      - name: Install Deps
         run: |
-          pip install -r backend/requirements.txt
-          pip install pyinstaller playwright
+          pip install fastapi uvicorn playwright jinja2 pyinstaller
           playwright install chromium
-
-      - name: Build EXE (Relative Import Fix)
+      - name: PyInstaller Build
         run: |
-          # 相対パスエラーを防ぐため、backendディレクトリ内でビルドを実行
           cd backend
-          pyinstaller --onefile --noconsole --name frisk-V3-win `
-          --add-data "templates;templates" `
-          --hidden-import=generator `
-          main.py
+          # 相対インポートエラー回避のため絶対パスで指定
+          pyinstaller --onefile --noconsole --name frisk-V3-win --add-data "templates;templates" main.py
           mv dist/frisk-V3-win.exe ../frisk-V3-win.exe
-
-      - name: Upload Windows Artifact
+      - name: Upload EXE
         uses: actions/upload-artifact@v4
         with:
           name: windows-binary
           path: frisk-V3-win.exe
 
-  # --- 2. Web版 (HTML/JS) ビルド ---
+  # --- Web (HTML/JS) ビルド ---
   build-web:
     runs-on: ubuntu-latest
     steps:
@@ -51,45 +43,34 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - name: Build Frontend
+      - name: Frontend Build
         run: |
-          # フォルダがあってもなくても動く「本気」の判定
-          TARGET_DIR=$( [ -d "frontend" ] && echo "frontend" || echo "." )
-          cd $TARGET_DIR
+          if [ -d "frontend" ]; then cd frontend; fi
           npm install
           npm run build
-          # ビルド結果(dist)をルートに移動
           cp -r dist ../web-dist
-      - name: Upload Web Artifact
+      - name: Upload Web
         uses: actions/upload-artifact@v4
         with:
           name: web-dist
           path: web-dist/
 
-  # --- 3. GitHub Release 自動作成 ---
-  deploy-release:
+  # --- GitHub Release 公開 ---
+  release:
     needs: [build-windows, build-web]
     runs-on: ubuntu-latest
     steps:
-      - name: Download All Artifacts
+      - name: Download Artifacts
         uses: actions/download-artifact@v4
-
-      - name: Zip Web Content
-        run: zip -r frisk-V3-web-edition.zip web-dist/
-
-      - name: Create GitHub Release
+      - name: Zip Web
+        run: zip -r frisk-V3-web.zip web-dist/
+      - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: v3.0.${{ github.run_number }}
+          tag_name: v3.${{ github.run_number }}
           name: "frisk-V3 Release #${{ github.run_number }}"
-          body: |
-            ## frisk-V3 本気ビルド完了
-            - **Windows版**: `frisk-V3-win.exe` (ダブルクリックで起動)
-            - **Web版**: `frisk-V3-web-edition.zip` (展開してindex.htmlを開く)
-            
-            ※Playwrightのブラウザエンジンを内蔵しているため、初回起動は少し時間がかかる場合があります。
           files: |
             windows-binary/frisk-V3-win.exe
-            frisk-V3-web-edition.zip
+            frisk-V3-web.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
